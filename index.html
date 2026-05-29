@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>栄ガーデン シフト管理</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  body { background: #FAFAF9; font-family: "Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",YuGothic,"Meiryo",system-ui,sans-serif; }
+  @media print { @page { size: A4 landscape; margin: 10mm; } body { background: white !important; } }
+</style>
+</head>
+<body>
+<div id="root">読み込み中…</div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+const DAYS = ['月','火','水','木','金','土','日'];
+const ACCENT = '#3F5B4A';
+const KEY_M = 'eigarden-shift-master';
+const KEY_E = 'eigarden-shift-exceptions';
+const SEED = [
+  { id:'E01', name:'大橋', kana:'オオハシ', start:'10:00', end:'15:00', brk:60, days:[0,1,3,4], note:'' },
+  { id:'E02', name:'高橋', kana:'タカハシ', start:'8:00',  end:'17:00', brk:60, days:[1,2,5,6], note:'' },
+  { id:'E03', name:'須山', kana:'スヤマ',   start:'9:00',  end:'16:00', brk:60, days:[0,2,4],   note:'' },
+  { id:'E04', name:'石塚', kana:'イシヅカ', start:'9:00',  end:'14:00', brk:0,  days:[0,2,4,5], note:'' },
+  { id:'E05', name:'野口', kana:'ノグチ',   start:'8:00',  end:'17:00', brk:60, days:[6],       note:'' },
+  { id:'E06', name:'吉田', kana:'ヨシダ',   start:'8:00',  end:'17:00', brk:60, days:[],        note:'ダブルワーク・申告制' },
+];
+const toMin = t => { if(!t) return 0; const p = String(t).split(':'); return (parseInt(p[0],10)||0)*60 + (parseInt(p[1],10)||0); };
+const calcJisDo = e => (!e.start||!e.end) ? 0 : Math.round(((toMin(e.end)-toMin(e.start))-(e.brk||0))/60*10)/10;
+const uid = () => 'X' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+const loadJSON = (k, fb) => { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : fb; } catch { return fb; } };
+const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+function buildWeeks(year, month){
+  const first = new Date(year, month-1, 1);
+  const firstDow = (first.getDay()+6) % 7;
+  const dim = new Date(year, month, 0).getDate();
+  const weeks=[]; let wk=[0,0,0,0,0,0,0], col=firstDow;
+  for(let d=1; d<=dim; d++){ wk[col]=d; if(col===6){ weeks.push(wk); wk=[0,0,0,0,0,0,0]; col=0; } else col++; }
+  if(wk.some(x=>x>0)) weeks.push(wk);
+  return weeks;
+}
+function membersForDay(wd, day, year, month, master, exceptions){
+  let list = master.filter(e => e.days.includes(wd)).map(e => ({...e, jisDo: calcJisDo(e)}));
+  exceptions.filter(x => x.year===year && x.month===month && x.day===day).forEach(x => {
+    const emp = master.find(e => e.name===x.name); if(!emp) return;
+    if(x.type==='休み'){ list = list.filter(e => e.name!==x.name); }
+    else if(x.type==='追加出勤'){
+      if(!list.some(e => e.name===x.name)){
+        let e = {...emp, jisDo: calcJisDo(emp)};
+        const m = (x.memo||'').match(/(\d{1,2}:\d{2})\s*[-〜~]\s*(\d{1,2}:\d{2})/);
+        if(m){ e = {...e, start:m[1], end:m[2], brk:0, jisDo: Math.round((toMin(m[2])-toMin(m[1]))/60*10)/10}; }
+        list.push(e);
+      }
+    }
+  });
+  return list.sort((a,b) => toMin(a.start) - toMin(b.start));
+}
+const Svg = ({size=15, children}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{children}</svg>;
+const IconCal = (p) => <Svg {...p}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></Svg>;
+const IconUsers = (p) => <Svg {...p}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></Svg>;
+const IconPrinter = (p) => <Svg {...p}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></Svg>;
+const IconLeft = (p) => <Svg {...p}><polyline points="15 18 9 12 15 6"/></Svg>;
+const IconRight = (p) => <Svg {...p}><polyline points="9 18 15 12 9 6"/></Svg>;
+const IconPlus = (p) => <Svg {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Svg>;
+const IconX = (p) => <Svg {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></Svg>;
+const IconTrash = (p) => <Svg {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></Svg>;
+const IconEdit = (p) => <Svg {...p}><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></Svg>;
+const IconCheck = (p) => <Svg {...p}><polyline points="20 6 9 17 4 12"/></Svg>;
+const IconDl = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></Svg>;
+const IconUp = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></Svg>;
+function ShiftManager(){
+  const [master, setMaster] = useState(null);
+  const [exceptions, setExceptions] = useState([]);
+  const [view, setView] = useState('calendar');
+  const [year, setYear] = useState(() => new Date().getFullYear());
+  const [month, setMonth] = useState(() => new Date().getMonth()+1);
+  const [editingDay, setEditingDay] = useState(null);
+  useEffect(() => { let m = loadJSON(KEY_M, null); if(!m){ m = SEED; saveJSON(KEY_M, m); } setMaster(m); setExceptions(loadJSON(KEY_E, [])); }, []);
+  const persistMaster = (next) => { setMaster(next); saveJSON(KEY_M, next); };
+  const persistExceptions = (next) => { setExceptions(next); saveJSON(KEY_E, next); };
+  const exportData = () => { const data = { master, exceptions, exportedAt: new Date().toISOString() }; const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `eigarden-shift-${new Date().toISOString().slice(0,10)}.json`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); };
+  const importData = (file) => { const r = new FileReader(); r.onload = () => { try { const data = JSON.parse(r.result); if(!data || !Array.isArray(data.master)) throw new Error('master が不正'); persistMaster(data.master); persistExceptions(Array.isArray(data.exceptions) ? data.exceptions : []); alert('インポート完了'); } catch(e) { alert('読み込み失敗: ' + e.message); } }; r.readAsText(file); };
+  if(!master) return <div className="min-h-screen flex items-center justify-center text-stone-500">読み込み中…</div>;
+  const weeks = buildWeeks(year, month);
+  const monthlyCounts = (() => { const c = {}; master.forEach(e => c[e.name]={days:0, hours:0}); weeks.forEach(wk => wk.forEach((d,i) => { if(d===0) return; membersForDay(i, d, year, month, master, exceptions).forEach(m => { if(!c[m.name]) c[m.name]={days:0, hours:0}; c[m.name].days += 1; c[m.name].hours += m.jisDo; }); })); return c; })();
+  const changeMonth = delta => { let y=year, m=month+delta; if(m<1){m=12;y--;}else if(m>12){m=1;y++;} setYear(y); setMonth(m); setEditingDay(null); };
+  const totalDays = Object.values(monthlyCounts).reduce((s,c) => s+c.days, 0);
+  const totalHours = Math.round(Object.values(monthlyCounts).reduce((s,c) => s+c.hours, 0)*10)/10;
+  return (
+    <div className="min-h-screen text-stone-900">
+      <header className="print:hidden border-b border-stone-200 bg-white">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between flex-wrap gap-3">
+          <div><h1 className="text-lg sm:text-xl font-semibold tracking-tight">栄ガーデン シフト管理</h1><p className="text-xs text-stone-500 mt-0.5">袋詰めシフト・基本固定＋例外申告</p></div>
+          <div className="flex items-center gap-2">
+            <nav className="flex gap-1">
+              {[{key:'calendar', label:'カレンダー', Icon:IconCal},{key:'master', label:'マスタ', Icon:IconUsers},{key:'print', label:'印刷', Icon:IconPrinter}].map(({key,label,Icon}) => (
+                <button key={key} onClick={() => setView(key)} className={`px-2 sm:px-3 py-2 text-xs sm:text-sm rounded-md flex items-center gap-1.5 transition ${view===key?'text-white shadow-sm':'text-stone-600 hover:bg-stone-100'}`} style={view===key ? {backgroundColor:ACCENT} : {}}><Icon/> <span className="hidden sm:inline">{label}</span></button>
+              ))}
+            </nav>
+            <div className="w-px h-6 bg-stone-200"/>
+            <button onClick={exportData} title="JSONを書き出す" className="p-2 rounded-md text-stone-600 hover:bg-stone-100"><IconDl/></button>
+            <label title="JSONを読み込む" className="p-2 rounded-md text-stone-600 hover:bg-stone-100 cursor-pointer"><IconUp/><input type="file" accept=".json,application/json" className="hidden" onChange={e => e.target.files[0] && importData(e.target.files[0])}/></label>
+          </div>
+        </div>
+      </header>
+      {view==='calendar' && (
+        <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div className="flex items-center gap-2"><button onClick={() => changeMonth(-1)} className="p-2 rounded-md hover:bg-stone-100"><IconLeft size={18}/></button><div className="text-lg font-semibold tabular-nums px-2">{year}年 {month}月</div><button onClick={() => changeMonth(1)} className="p-2 rounded-md hover:bg-stone-100"><IconRight size={18}/></button></div>
+            <div className="text-xs text-stone-500">日付をタップで変更（休み/追加出勤）を追加</div>
+          </div>
+          <div className="bg-white border border-stone-200 rounded-lg overflow-x-auto">
+            <div className="min-w-[640px]">
+              <div className="grid grid-cols-7 border-b border-stone-200 bg-stone-50">{DAYS.map(d => (<div key={d} className={`px-2 py-2 text-xs font-semibold text-center ${d==='土'?'text-sky-700':d==='日'?'text-rose-700':'text-stone-600'}`}>{d}</div>))}</div>
+              {weeks.map((wk, wi) => (
+                <div key={wi} className="grid grid-cols-7 border-b last:border-b-0 border-stone-200">
+                  {wk.map((day, di) => {
+                    if(day===0) return <div key={di} className="bg-stone-50/60 min-h-[100px] border-r last:border-r-0 border-stone-200"/>;
+                    const mem = membersForDay(di, day, year, month, master, exceptions);
+                    const tot = Math.round(mem.reduce((s,e) => s+e.jisDo, 0)*10)/10;
+                    const isEditing = editingDay === day;
+                    const hasException = exceptions.some(x => x.year===year && x.month===month && x.day===day);
+                    return (
+                      <button key={di} onClick={() => setEditingDay(isEditing ? null : day)} className="text-left p-2 min-h-[100px] border-r last:border-r-0 border-stone-200 hover:bg-stone-50 transition relative" style={isEditing ? {boxShadow:`inset 0 0 0 2px ${ACCENT}`} : {}}>
+                        <div className="flex items-center justify-between mb-1"><span className="text-xs font-semibold text-stone-700">{day}</span>{hasException && <span className="w-1.5 h-1.5 rounded-full" style={{backgroundColor:ACCENT}}/>}</div>
+                        <div className="space-y-0.5">{mem.map((e,i) => (<div key={i} className="text-[11px] leading-tight text-stone-700"><span className="font-medium">{e.name}</span> <span className="tabular-nums text-stone-500">{e.start}-{e.end}</span></div>))}</div>
+                        {mem.length>0 && <div className="text-[10px] text-stone-400 mt-1 tabular-nums">計 {tot}h・{mem.length}名</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+          {editingDay && <ExceptionEditor day={editingDay} year={year} month={month} master={master} exceptions={exceptions} onClose={()=>setEditingDay(null)} persist={persistExceptions}/>}
+          <div className="mt-6 bg-white border border-stone-200 rounded-lg p-4 overflow-x-auto">
+            <h2 className="text-sm font-semibold mb-3 text-stone-700">個人別 月間合計（{year}年{month}月）</h2>
+            <table className="w-full text-sm">
+              <thead><tr className="text-xs text-stone-500 border-b border-stone-200"><th className="text-left py-2 font-medium">氏名</th><th className="text-left py-2 font-medium">担当/区分</th><th className="text-right py-2 font-medium">月間日数</th><th className="text-right py-2 font-medium">月間合計</th></tr></thead>
+              <tbody>{master.map(e => { const c = monthlyCounts[e.name] || {days:0, hours:0}; const pat = e.days.length ? e.days.map(d=>DAYS[d]).join('') : '申告制'; return (<tr key={e.id} className="border-b last:border-b-0 border-stone-100"><td className="py-2">{e.name}</td><td className="py-2 text-stone-500">{pat}</td><td className="py-2 text-right tabular-nums">{c.days}日</td><td className="py-2 text-right tabular-nums font-medium">{Math.round(c.hours*10)/10}h</td></tr>); })}
+                <tr className="font-semibold"><td className="py-2">合計</td><td/><td className="py-2 text-right tabular-nums">{totalDays}日</td><td className="py-2 text-right tabular-nums">{totalHours}h</td></tr></tbody>
+            </table>
+          </div>
+        </main>
+      )}
+      {view==='master' && <MasterView master={master} persist={persistMaster}/>}
+      {view==='print' && <PrintView year={year} month={month} weeks={weeks} master={master} exceptions={exceptions} changeMonth={changeMonth}/>}
+    </div>
+  );
+}
+function ExceptionEditor({ day, year, month, master, exceptions, onClose, persist }){
+  const [name, setName] = useState(master[0]?.name || ''); const [type, setType] = useState('休み'); const [memo, setMemo] = useState('');
+  const dayExceptions = exceptions.filter(x => x.year===year && x.month===month && x.day===day);
+  const add = () => { if(!name) return; persist([...exceptions, { id:uid(), year, month, day, name, type, memo }]); setMemo(''); };
+  const remove = (id) => persist(exceptions.filter(x => x.id !== id));
+  return (
+    <div className="mt-4 bg-white border-2 rounded-lg p-4" style={{borderColor:ACCENT}}>
+      <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-semibold">{year}年{month}月{day}日 の変更</h3><button onClick={onClose} className="p-1 rounded hover:bg-stone-100"><IconX size={16}/></button></div>
+      {dayExceptions.length>0 && (<div className="mb-3 space-y-1">{dayExceptions.map(x => (<div key={x.id} className="flex items-center justify-between text-xs bg-stone-50 px-2 py-1.5 rounded"><span><span className="font-medium">{x.name}</span> <span className="text-stone-500">[{x.type}]</span>{x.memo && <span className="text-stone-500"> / {x.memo}</span>}</span><button onClick={()=>remove(x.id)} className="p-1 rounded hover:bg-stone-200"><IconTrash size={12}/></button></div>))}</div>)}
+      <div className="flex flex-wrap gap-2 items-center text-sm">
+        <select value={name} onChange={e=>setName(e.target.value)} className="px-2 py-1.5 border border-stone-300 rounded text-sm bg-white">{master.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}</select>
+        <select value={type} onChange={e=>setType(e.target.value)} className="px-2 py-1.5 border border-stone-300 rounded text-sm bg-white"><option value="休み">休み</option><option value="追加出勤">追加出勤</option></select>
+        <input value={memo} onChange={e=>setMemo(e.target.value)} placeholder="時間メモ (例 13:00-17:00) 任意" className="px-2 py-1.5 border border-stone-300 rounded text-sm flex-1 min-w-[160px]"/>
+        <button onClick={add} className="px-3 py-1.5 text-white text-sm rounded flex items-center gap-1" style={{backgroundColor:ACCENT}}><IconPlus size={14}/>追加</button>
+      </div>
+    </div>
+  );
+}
+function MasterView({ master, persist }){
+  const [editId, setEditId] = useState(null); const [form, setForm] = useState(null);
+  const startEdit = (e) => { setEditId(e.id); setForm({...e}); };
+  const save = () => { persist(master.map(e => e.id===editId ? form : e)); setEditId(null); setForm(null); };
+  const del = (id) => { if(!window.confirm('この従業員を削除しますか？')) return; persist(master.filter(e => e.id !== id)); };
+  const add = () => { const ne = { id:uid(), name:'新規', kana:'', start:'9:00', end:'17:00', brk:60, days:[], note:'' }; persist([...master, ne]); startEdit(ne); };
+  const toggleDay = (di) => setForm(f => ({...f, days: f.days.includes(di) ? f.days.filter(d=>d!==di) : [...f.days, di].sort((a,b)=>a-b)}));
+  return (
+    <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+      <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">従業員マスタ</h2><button onClick={add} className="px-3 py-2 text-white text-sm rounded flex items-center gap-1" style={{backgroundColor:ACCENT}}><IconPlus size={14}/>新規追加</button></div>
+      <div className="bg-white border border-stone-200 rounded-lg overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className="text-xs text-stone-500 bg-stone-50 border-b border-stone-200"><th className="text-left px-3 py-2 font-medium whitespace-nowrap">氏名</th><th className="text-left px-3 py-2 font-medium whitespace-nowrap">時間</th><th className="text-left px-3 py-2 font-medium whitespace-nowrap">休憩</th><th className="text-left px-3 py-2 font-medium whitespace-nowrap">実働</th><th className="text-left px-3 py-2 font-medium whitespace-nowrap">出勤曜日</th><th className="text-right px-3 py-2 font-medium whitespace-nowrap">操作</th></tr></thead>
+          <tbody>
+            {master.map(e => editId===e.id ? (
+              <tr key={e.id} className="border-b last:border-b-0 border-stone-100 bg-amber-50/40">
+                <td className="px-3 py-2"><input value={form.name} onChange={ev=>setForm({...form, name:ev.target.value})} className="w-20 px-2 py-1 border border-stone-300 rounded"/></td>
+                <td className="px-3 py-2 whitespace-nowrap"><input value={form.start} onChange={ev=>setForm({...form, start:ev.target.value})} className="w-16 px-2 py-1 border border-stone-300 rounded text-xs tabular-nums"/><span className="mx-1 text-stone-400">〜</span><input value={form.end} onChange={ev=>setForm({...form, end:ev.target.value})} className="w-16 px-2 py-1 border border-stone-300 rounded text-xs tabular-nums"/></td>
+                <td className="px-3 py-2 whitespace-nowrap"><input type="number" value={form.brk} onChange={ev=>setForm({...form, brk:parseInt(ev.target.value,10)||0})} className="w-14 px-2 py-1 border border-stone-300 rounded text-xs tabular-nums"/>分</td>
+                <td className="px-3 py-2 tabular-nums text-stone-500">{calcJisDo(form)}h</td>
+                <td className="px-3 py-2"><div className="flex gap-1">{DAYS.map((d,di) => (<button key={di} onClick={()=>toggleDay(di)} className={`w-7 h-7 text-xs rounded ${form.days.includes(di)?'text-white':'bg-stone-100 text-stone-500 hover:bg-stone-200'}`} style={form.days.includes(di) ? {backgroundColor:ACCENT} : {}}>{d}</button>))}</div></td>
+                <td className="px-3 py-2 text-right whitespace-nowrap"><button onClick={save} className="px-2 py-1 text-xs text-white rounded mr-1 inline-flex items-center gap-1" style={{backgroundColor:ACCENT}}><IconCheck size={12}/>保存</button><button onClick={()=>{setEditId(null); setForm(null);}} className="px-2 py-1 text-xs bg-stone-100 rounded">キャンセル</button></td>
+              </tr>
+            ) : (
+              <tr key={e.id} className="border-b last:border-b-0 border-stone-100 hover:bg-stone-50">
+                <td className="px-3 py-2 font-medium whitespace-nowrap">{e.name} <span className="text-xs text-stone-400 ml-1">{e.kana}</span></td>
+                <td className="px-3 py-2 tabular-nums text-stone-600 whitespace-nowrap">{e.start}〜{e.end}</td>
+                <td className="px-3 py-2 tabular-nums text-stone-600 whitespace-nowrap">{e.brk}分</td>
+                <td className="px-3 py-2 tabular-nums">{calcJisDo(e)}h</td>
+                <td className="px-3 py-2 whitespace-nowrap">{e.days.length ? e.days.map(d=>DAYS[d]).join('') : <span className="text-stone-400 text-xs">申告制</span>}</td>
+                <td className="px-3 py-2 text-right whitespace-nowrap"><button onClick={()=>startEdit(e)} className="px-2 py-1 text-xs bg-stone-100 rounded mr-1 hover:bg-stone-200 inline-flex items-center"><IconEdit size={12}/></button><button onClick={()=>del(e.id)} className="px-2 py-1 text-xs text-rose-700 hover:bg-rose-50 rounded inline-flex items-center"><IconTrash size={12}/></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-stone-500 mt-3">※ 出勤曜日を空にすると「申告制」になります。</p>
+    </main>
+  );
+}
+function PrintView({ year, month, weeks, master, exceptions, changeMonth }){
+  return (<>
+    <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 print:hidden">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="flex items-center gap-2"><button onClick={()=>changeMonth(-1)} className="p-2 rounded-md hover:bg-stone-100"><IconLeft size={18}/></button><div className="text-lg font-semibold tabular-nums px-2">{year}年 {month}月（掲示用）</div><button onClick={()=>changeMonth(1)} className="p-2 rounded-md hover:bg-stone-100"><IconRight size={18}/></button></div>
+        <button onClick={()=>window.print()} className="px-4 py-2 text-white text-sm rounded flex items-center gap-1.5" style={{backgroundColor:ACCENT}}><IconPrinter size={14}/>印刷する（A4横）</button>
+      </div>
+      <p className="text-xs text-stone-500 mb-3">下のプレビューが印刷されます。印刷ダイアログで「横向き」「1ページに合わせる」を選んでください。</p>
+      <div className="border border-stone-200 rounded-lg overflow-x-auto bg-white p-4"><PrintLayout year={year} month={month} weeks={weeks} master={master} exceptions={exceptions}/></div>
+    </main>
+    <div className="hidden print:block"><PrintLayout year={year} month={month} weeks={weeks} master={master} exceptions={exceptions}/></div>
+  </>);
+}
+function PrintLayout({ year, month, weeks, master, exceptions }){
+  return (
+    <div className="bg-white">
+      <h1 className="text-center text-xl font-bold mb-1">栄ガーデン　袋詰めシフト　{year}年{month}月</h1>
+      <p className="text-center text-xs text-stone-500 mb-3">勤務時間（出社〜退社）</p>
+      <div className="border border-stone-400 min-w-[640px]">
+        <div className="grid grid-cols-7 border-b border-stone-400 bg-stone-100">{DAYS.map(d => (<div key={d} className={`px-2 py-1 text-xs font-bold text-center border-r last:border-r-0 border-stone-400 ${d==='土'?'text-sky-700':d==='日'?'text-rose-700':'text-stone-700'}`}>{d}</div>))}</div>
+        {weeks.map((wk, wi) => (
+          <div key={wi} className="grid grid-cols-7 border-b last:border-b-0 border-stone-400">
+            {wk.map((day, di) => {
+              if(day===0) return <div key={di} className="bg-stone-50 min-h-[80px] border-r last:border-r-0 border-stone-400"/>;
+              const mem = membersForDay(di, day, year, month, master, exceptions);
+              return (<div key={di} className="p-1.5 min-h-[80px] border-r last:border-r-0 border-stone-400 text-[10px]"><div className="font-bold text-stone-700 mb-0.5">{day}</div>{mem.map((e,i) => (<div key={i} className="leading-tight"><span className="font-medium">{e.name}</span> <span className="tabular-nums">{e.start}-{e.end}</span></div>))}</div>);
+            })}
+          </div>
+        ))}
+      </div>
+      <p className="text-center text-[10px] text-stone-500 mt-2">※ 変更がある場合は早めに杉さんまでご連絡ください。</p>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<ShiftManager/>);
+</script>
+</body>
+</html>
