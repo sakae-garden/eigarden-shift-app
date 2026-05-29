@@ -8,6 +8,7 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="app-config.js"></script>
 <style>
   body { background: #FAFAF9; font-family: "Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",YuGothic,"Meiryo",system-ui,sans-serif; }
   @media print { @page { size: A4 landscape; margin: 10mm; } body { background: white !important; } }
@@ -16,7 +17,7 @@
 <body>
 <div id="root">読み込み中…</div>
 <script type="text/babel" data-presets="react">
-const { useState, useEffect } = React;
+const { useState, useEffect, useCallback } = React;
 const DAYS = ['月','火','水','木','金','土','日'];
 const ACCENT = '#3F5B4A';
 const KEY_M = 'eigarden-shift-master';
@@ -34,6 +35,21 @@ const calcJisDo = e => (!e.start||!e.end) ? 0 : Math.round(((toMin(e.end)-toMin(
 const uid = () => 'X' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 const loadJSON = (k, fb) => { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : fb; } catch { return fb; } };
 const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const GAS = (typeof window !== 'undefined' && window.__GAS_URL__) ? window.__GAS_URL__ : '';
+function jsonpLoad(timeoutMs){
+  return new Promise((resolve, reject) => {
+    if(!GAS){ reject(new Error('no-url')); return; }
+    const cb = 'cb_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+    const s = document.createElement('script');
+    const timer = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, timeoutMs||8000);
+    function cleanup(){ clearTimeout(timer); try{ delete window[cb]; }catch(e){} if(s.parentNode) s.parentNode.removeChild(s); }
+    window[cb] = (data) => { cleanup(); resolve(data); };
+    s.onerror = () => { cleanup(); reject(new Error('script-error')); };
+    s.src = GAS + (GAS.indexOf('?')>=0?'&':'?') + 'action=load&callback=' + cb + '&_=' + Date.now();
+    document.body.appendChild(s);
+  });
+}
+function gasSave(obj){ if(!GAS) return; try { fetch(GAS, { method:'POST', mode:'no-cors', body: JSON.stringify(obj) }); } catch(e){ console.warn('save failed', e); } }
 function buildWeeks(year, month){
   const first = new Date(year, month-1, 1);
   const firstDow = (first.getDay()+6) % 7;
@@ -72,6 +88,7 @@ const IconEdit = (p) => <Svg {...p}><path d="M12 20h9"/><path d="M16.5 3.5a2.121
 const IconCheck = (p) => <Svg {...p}><polyline points="20 6 9 17 4 12"/></Svg>;
 const IconDl = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></Svg>;
 const IconUp = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></Svg>;
+const IconRefresh = (p) => <Svg {...p}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></Svg>;
 function ShiftManager(){
   const [master, setMaster] = useState(null);
   const [exceptions, setExceptions] = useState([]);
@@ -79,22 +96,49 @@ function ShiftManager(){
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth()+1);
   const [editingDay, setEditingDay] = useState(null);
-  useEffect(() => { let m = loadJSON(KEY_M, null); if(!m){ m = SEED; saveJSON(KEY_M, m); } setMaster(m); setExceptions(loadJSON(KEY_E, [])); }, []);
-  const persistMaster = (next) => { setMaster(next); saveJSON(KEY_M, next); };
-  const persistExceptions = (next) => { setExceptions(next); saveJSON(KEY_E, next); };
+  const [synced, setSynced] = useState(false);
+  const [loadingRemote, setLoadingRemote] = useState(!!GAS);
+  const pull = useCallback(() => {
+    if(!GAS) return;
+    setLoadingRemote(true);
+    jsonpLoad(8000).then(data => {
+      setLoadingRemote(false);
+      if (data && Array.isArray(data.master)) {
+        setMaster(data.master); saveJSON(KEY_M, data.master);
+        const ex = Array.isArray(data.exceptions) ? data.exceptions : [];
+        setExceptions(ex); saveJSON(KEY_E, ex);
+        setSynced(true);
+      } else {
+        const m = loadJSON(KEY_M, null) || SEED;
+        const ex = loadJSON(KEY_E, []);
+        setMaster(m); setExceptions(ex); saveJSON(KEY_M, m); saveJSON(KEY_E, ex);
+        gasSave({ master: m, exceptions: ex });
+        setSynced(true);
+      }
+    }).catch(err => { setLoadingRemote(false); console.warn('GAS load failed, using local', err); });
+  }, []);
+  useEffect(() => {
+    let m = loadJSON(KEY_M, null);
+    if (!m && !GAS) { m = SEED; saveJSON(KEY_M, m); }
+    setMaster(m); setExceptions(loadJSON(KEY_E, []));
+    if (GAS) pull();
+  }, [pull]);
+  const persistMaster = (next) => { setMaster(next); saveJSON(KEY_M, next); gasSave({ master: next, exceptions: exceptions }); };
+  const persistExceptions = (next) => { setExceptions(next); saveJSON(KEY_E, next); gasSave({ master: master, exceptions: next }); };
   const exportData = () => { const data = { master, exceptions, exportedAt: new Date().toISOString() }; const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `eigarden-shift-${new Date().toISOString().slice(0,10)}.json`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); };
   const importData = (file) => { const r = new FileReader(); r.onload = () => { try { const data = JSON.parse(r.result); if(!data || !Array.isArray(data.master)) throw new Error('master が不正'); persistMaster(data.master); persistExceptions(Array.isArray(data.exceptions) ? data.exceptions : []); alert('インポート完了'); } catch(e) { alert('読み込み失敗: ' + e.message); } }; r.readAsText(file); };
-  if(!master) return <div className="min-h-screen flex items-center justify-center text-stone-500">読み込み中…</div>;
+  if(!master) return <div className="min-h-screen flex items-center justify-center text-stone-500">{GAS ? '同期データを取得中…' : '読み込み中…'}</div>;
   const weeks = buildWeeks(year, month);
   const monthlyCounts = (() => { const c = {}; master.forEach(e => c[e.name]={days:0, hours:0}); weeks.forEach(wk => wk.forEach((d,i) => { if(d===0) return; membersForDay(i, d, year, month, master, exceptions).forEach(m => { if(!c[m.name]) c[m.name]={days:0, hours:0}; c[m.name].days += 1; c[m.name].hours += m.jisDo; }); })); return c; })();
   const changeMonth = delta => { let y=year, m=month+delta; if(m<1){m=12;y--;}else if(m>12){m=1;y++;} setYear(y); setMonth(m); setEditingDay(null); };
   const totalDays = Object.values(monthlyCounts).reduce((s,c) => s+c.days, 0);
   const totalHours = Math.round(Object.values(monthlyCounts).reduce((s,c) => s+c.hours, 0)*10)/10;
+  const statusText = GAS ? (loadingRemote ? '最新を取得中…' : (synced ? '● 共有中（開くと最新を取得）' : '未接続（このブラウザのみ）')) : 'このブラウザのみ保存';
   return (
     <div className="min-h-screen text-stone-900">
       <header className="print:hidden border-b border-stone-200 bg-white">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between flex-wrap gap-3">
-          <div><h1 className="text-lg sm:text-xl font-semibold tracking-tight">栄ガーデン シフト管理</h1><p className="text-xs text-stone-500 mt-0.5">袋詰めシフト・基本固定＋例外申告</p></div>
+          <div><h1 className="text-lg sm:text-xl font-semibold tracking-tight">栄ガーデン シフト管理</h1><p className="text-xs mt-0.5" style={{color: (GAS && synced) ? ACCENT : '#78716c'}}>袋詰めシフト・{statusText}</p></div>
           <div className="flex items-center gap-2">
             <nav className="flex gap-1">
               {[{key:'calendar', label:'カレンダー', Icon:IconCal},{key:'master', label:'マスタ', Icon:IconUsers},{key:'print', label:'印刷', Icon:IconPrinter}].map(({key,label,Icon}) => (
@@ -102,6 +146,7 @@ function ShiftManager(){
               ))}
             </nav>
             <div className="w-px h-6 bg-stone-200"/>
+            {GAS && <button onClick={pull} title="最新を取得" className="p-2 rounded-md text-stone-600 hover:bg-stone-100"><IconRefresh/></button>}
             <button onClick={exportData} title="JSONを書き出す" className="p-2 rounded-md text-stone-600 hover:bg-stone-100"><IconDl/></button>
             <label title="JSONを読み込む" className="p-2 rounded-md text-stone-600 hover:bg-stone-100 cursor-pointer"><IconUp/><input type="file" accept=".json,application/json" className="hidden" onChange={e => e.target.files[0] && importData(e.target.files[0])}/></label>
           </div>
@@ -206,7 +251,7 @@ function MasterView({ master, persist }){
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-stone-500 mt-3">※ 出勤曜日を空にすると「申告制」になります。</p>
+      <p className="text-xs text-stone-500 mt-3">※ 出勤曜日を空にすると「申告制」になります。編集内容は自動で共有ストアにも保存されます。</p>
     </main>
   );
 }
