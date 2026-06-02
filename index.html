@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>栄ガーデン シフト管理</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#3F5B4A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="シフト">
+<link rel="apple-touch-icon" href="icon-512.png">
 <script src="https://cdn.tailwindcss.com"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -62,14 +69,24 @@ function buildWeeks(year, month){
 function membersForDay(wd, day, year, month, master, exceptions){
   let list = master.filter(e => e.days.includes(wd)).map(e => ({...e, jisDo: calcJisDo(e)}));
   exceptions.filter(x => x.year===year && x.month===month && x.day===day).forEach(x => {
-    const emp = master.find(e => e.name===x.name); if(!emp) return;
-    if(x.type==='休み'){ list = list.filter(e => e.name!==x.name); }
-    else if(x.type==='追加出勤'){
-      if(!list.some(e => e.name===x.name)){
-        let e = {...emp, jisDo: calcJisDo(emp)};
-        const m = (x.memo||'').match(/(\d{1,2}:\d{2})\s*[-〜~]\s*(\d{1,2}:\d{2})/);
-        if(m){ e = {...e, start:m[1], end:m[2], brk:0, jisDo: Math.round((toMin(m[2])-toMin(m[1]))/60*10)/10}; }
-        list.push(e);
+    const emp = master.find(e => e.name===x.name);
+    if(x.type==='休み'){ list = list.filter(e => e.name!==x.name); return; }
+    let st = x.start, en = x.end, bk = (x.brk!=null ? x.brk : null);
+    if((!st || !en) && x.memo){ const m=(x.memo||'').match(/(\d{1,2}:\d{2})\s*[-〜~]\s*(\d{1,2}:\d{2})/); if(m){ st=m[1]; en=m[2]; if(bk==null) bk=0; } }
+    if(x.type==='時間変更'){
+      const idx = list.findIndex(e => e.name===x.name);
+      if(idx>=0){
+        const base = list[idx];
+        const ns = st||base.start, ne = en||base.end, nb = (bk!=null?bk:base.brk);
+        list[idx] = {...base, start:ns, end:ne, brk:nb, jisDo: calcJisDo({start:ns,end:ne,brk:nb})};
+      } else if(emp){
+        const ns = st||emp.start, ne = en||emp.end, nb = (bk!=null?bk:(emp.brk||0));
+        list.push({...emp, start:ns, end:ne, brk:nb, jisDo: calcJisDo({start:ns,end:ne,brk:nb})});
+      }
+    } else if(x.type==='追加出勤'){
+      if(!list.some(e => e.name===x.name) && emp){
+        const ns = st||emp.start, ne = en||emp.end, nb = (bk!=null?bk:(emp.brk||0));
+        list.push({...emp, start:ns, end:ne, brk:nb, jisDo: calcJisDo({start:ns,end:ne,brk:nb})});
       }
     }
   });
@@ -156,7 +173,7 @@ function ShiftManager(){
         <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div className="flex items-center gap-2"><button onClick={() => changeMonth(-1)} className="p-2 rounded-md hover:bg-stone-100"><IconLeft size={18}/></button><div className="text-lg font-semibold tabular-nums px-2">{year}年 {month}月</div><button onClick={() => changeMonth(1)} className="p-2 rounded-md hover:bg-stone-100"><IconRight size={18}/></button></div>
-            <div className="text-xs text-stone-500">日付をタップで変更（休み/追加出勤）を追加</div>
+            <div className="text-xs text-stone-500">日付をタップで変更（時間変更・休み・追加出勤）を追加</div>
           </div>
           <div className="bg-white border border-stone-200 rounded-lg overflow-x-auto">
             <div className="min-w-[640px]">
@@ -198,20 +215,47 @@ function ShiftManager(){
   );
 }
 function ExceptionEditor({ day, year, month, master, exceptions, onClose, persist }){
-  const [name, setName] = useState(master[0]?.name || ''); const [type, setType] = useState('休み'); const [memo, setMemo] = useState('');
+  const [name, setName] = useState(master[0]?.name || '');
+  const [type, setType] = useState('時間変更');
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const [brk, setBrk] = useState(60);
+  useEffect(() => {
+    const e = master.find(m => m.name===name);
+    if(!e) return;
+    setStart(e.start || '9:00'); setEnd(e.end || '17:00'); setBrk(e.brk!=null ? e.brk : 60);
+  }, [name]);
   const dayExceptions = exceptions.filter(x => x.year===year && x.month===month && x.day===day);
-  const add = () => { if(!name) return; persist([...exceptions, { id:uid(), year, month, day, name, type, memo }]); setMemo(''); };
+  const add = () => {
+    if(!name) return;
+    let ex = { id:uid(), year, month, day, name, type };
+    if(type!=='休み'){ ex.start=start; ex.end=end; ex.brk=parseInt(brk,10)||0; }
+    persist([...exceptions, ex]);
+  };
   const remove = (id) => persist(exceptions.filter(x => x.id !== id));
+  const label = (x) => {
+    if(x.type==='休み') return '休み';
+    const t = (x.start&&x.end) ? (x.start+'-'+x.end) : (x.memo||'');
+    return x.type + (t ? ' '+t : '');
+  };
   return (
     <div className="mt-4 bg-white border-2 rounded-lg p-4" style={{borderColor:ACCENT}}>
       <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-semibold">{year}年{month}月{day}日 の変更</h3><button onClick={onClose} className="p-1 rounded hover:bg-stone-100"><IconX size={16}/></button></div>
-      {dayExceptions.length>0 && (<div className="mb-3 space-y-1">{dayExceptions.map(x => (<div key={x.id} className="flex items-center justify-between text-xs bg-stone-50 px-2 py-1.5 rounded"><span><span className="font-medium">{x.name}</span> <span className="text-stone-500">[{x.type}]</span>{x.memo && <span className="text-stone-500"> / {x.memo}</span>}</span><button onClick={()=>remove(x.id)} className="p-1 rounded hover:bg-stone-200"><IconTrash size={12}/></button></div>))}</div>)}
+      {dayExceptions.length>0 && (<div className="mb-3 space-y-1">{dayExceptions.map(x => (<div key={x.id} className="flex items-center justify-between text-xs bg-stone-50 px-2 py-1.5 rounded"><span><span className="font-medium">{x.name}</span> <span className="text-stone-500">[{label(x)}]</span></span><button onClick={()=>remove(x.id)} className="p-1 rounded hover:bg-stone-200"><IconTrash size={12}/></button></div>))}</div>)}
       <div className="flex flex-wrap gap-2 items-center text-sm">
         <select value={name} onChange={e=>setName(e.target.value)} className="px-2 py-1.5 border border-stone-300 rounded text-sm bg-white">{master.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}</select>
-        <select value={type} onChange={e=>setType(e.target.value)} className="px-2 py-1.5 border border-stone-300 rounded text-sm bg-white"><option value="休み">休み</option><option value="追加出勤">追加出勤</option></select>
-        <input value={memo} onChange={e=>setMemo(e.target.value)} placeholder="時間メモ (例 13:00-17:00) 任意" className="px-2 py-1.5 border border-stone-300 rounded text-sm flex-1 min-w-[160px]"/>
+        <select value={type} onChange={e=>setType(e.target.value)} className="px-2 py-1.5 border border-stone-300 rounded text-sm bg-white"><option value="時間変更">時間変更</option><option value="休み">休み</option><option value="追加出勤">追加出勤</option></select>
+        {type!=='休み' && (<>
+          <input value={start} onChange={e=>setStart(e.target.value)} placeholder="開始 9:00" className="w-20 px-2 py-1.5 border border-stone-300 rounded text-sm tabular-nums"/>
+          <span className="text-stone-400">〜</span>
+          <input value={end} onChange={e=>setEnd(e.target.value)} placeholder="終了 17:00" className="w-20 px-2 py-1.5 border border-stone-300 rounded text-sm tabular-nums"/>
+          <span className="text-xs text-stone-500">休憩</span>
+          <input type="number" value={brk} onChange={e=>setBrk(e.target.value)} className="w-16 px-2 py-1.5 border border-stone-300 rounded text-sm tabular-nums"/>
+          <span className="text-xs text-stone-500">分</span>
+        </>)}
         <button onClick={add} className="px-3 py-1.5 text-white text-sm rounded flex items-center gap-1" style={{backgroundColor:ACCENT}}><IconPlus size={14}/>追加</button>
       </div>
+      <p className="text-[11px] text-stone-500 mt-2">時間変更＝その日だけ勤務時間を上書き／休み＝その日は外す／追加出勤＝普段出ない人を追加</p>
     </div>
   );
 }
@@ -290,6 +334,11 @@ function PrintLayout({ year, month, weeks, master, exceptions }){
   );
 }
 ReactDOM.createRoot(document.getElementById('root')).render(<ShiftManager/>);
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
+}
 </script>
 </body>
 </html>
