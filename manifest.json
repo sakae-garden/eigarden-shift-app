@@ -1,8 +1,9 @@
 {
+  "id": "/eigarden-shift-app/",
   "name": "栄ガーデン シフト管理",
   "short_name": "シフト",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/eigarden-shift-app/",
+  "scope": "/eigarden-shift-app/",
   "display": "standalone",
   "background_color": "#FAFAF9",
   "theme_color": "#3F5B4A",
