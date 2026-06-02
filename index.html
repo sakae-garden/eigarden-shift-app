@@ -39,7 +39,7 @@ const PALETTE = [
   { bg:'#ecfccb', fg:'#4d7c0f' },
   { bg:'#e0e7ff', fg:'#4338ca' },
 ];
-function colorFor(name){ let h=0; const s=name||''; for(let i=0;i<s.length;i++){ h=(h*31 + s.charCodeAt(i))>>>0; } return PALETTE[h % PALETTE.length]; }
+function colorOf(name, master){ const i = (master||[]).findIndex(e => e.name===name); return PALETTE[(i<0?0:i) % PALETTE.length]; }
 const KEY_M = 'eigarden-shift-master';
 const KEY_E = 'eigarden-shift-exceptions';
 const SEED = [
@@ -186,28 +186,28 @@ function ShiftManager(){
       {view==='calendar' && (
         <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <div className="flex items-center gap-2"><button onClick={() => changeMonth(-1)} className="p-2 rounded-md hover:bg-stone-100"><IconLeft size={18}/></button><div className="text-lg font-semibold tabular-nums px-2">{year}年 {month}月</div><button onClick={() => changeMonth(1)} className="p-2 rounded-md hover:bg-stone-100"><IconRight size={18}/></button></div>
+            <div className="flex items-center gap-1"><button onClick={() => changeMonth(-1)} className="p-2 rounded-md hover:bg-stone-100"><IconLeft size={22}/></button><div className="text-2xl font-bold tabular-nums px-2">{year}年 {month}月</div><button onClick={() => changeMonth(1)} className="p-2 rounded-md hover:bg-stone-100"><IconRight size={22}/></button></div>
             <div className="text-xs text-stone-500">日付をタップで変更（時間変更・休み・追加出勤）を追加</div>
           </div>
           <div className="bg-white border border-stone-200 rounded-xl overflow-x-auto shadow-sm">
             <div className="min-w-[640px]">
-              <div className="grid grid-cols-7 border-b border-stone-200 bg-stone-50">{DAYS.map((d,di) => (<div key={d} className={`px-2 py-2 text-xs font-bold text-center ${di===5?'text-sky-600':di===6?'text-rose-500':'text-stone-600'}`}>{d}</div>))}</div>
+              <div className="grid grid-cols-7 border-b border-stone-200 bg-stone-50">{DAYS.map((d,di) => (<div key={d} className={`px-2 py-2.5 text-sm font-bold text-center ${di===5?'text-sky-600':di===6?'text-rose-500':'text-stone-600'}`}>{d}</div>))}</div>
               {weeks.map((wk, wi) => (
                 <div key={wi} className="grid grid-cols-7 border-b last:border-b-0 border-stone-200">
                   {wk.map((day, di) => {
-                    if(day===0) return <div key={di} className="bg-stone-50/60 min-h-[104px] border-r last:border-r-0 border-stone-200"/>;
+                    if(day===0) return <div key={di} className="bg-stone-50/60 min-h-[116px] border-r last:border-r-0 border-stone-200"/>;
                     const mem = membersForDay(di, day, year, month, master, exceptions);
                     const tot = Math.round(mem.reduce((s,e) => s+e.jisDo, 0)*10)/10;
                     const isEditing = editingDay === day;
                     const hasException = exceptions.some(x => x.year===year && x.month===month && x.day===day);
                     const isToday = todayObj.getFullYear()===year && (todayObj.getMonth()+1)===month && todayObj.getDate()===day;
                     return (
-                      <button key={di} onClick={() => setEditingDay(isEditing ? null : day)} className={`text-left p-1.5 min-h-[104px] border-r last:border-r-0 border-stone-200 hover:bg-stone-50 transition relative ${di>=5?'bg-stone-50/40':''}`} style={isEditing ? {boxShadow:`inset 0 0 0 2px ${ACCENT}`} : {}}>
+                      <button key={di} onClick={() => setEditingDay(isEditing ? null : day)} className={`flex flex-col text-left p-1.5 min-h-[116px] border-r last:border-r-0 border-stone-200 hover:bg-stone-50 transition relative ${di>=5?'bg-stone-50/40':''}`} style={isEditing ? {boxShadow:`inset 0 0 0 2px ${ACCENT}`} : {}}>
                         <div className="flex items-center justify-between mb-1">
-                          <span className={`text-xs font-bold w-6 h-6 inline-flex items-center justify-center rounded-full ${isToday ? 'text-white' : (di===5?'text-sky-600':di===6?'text-rose-500':'text-stone-600')}`} style={isToday ? {backgroundColor:ACCENT} : {}}>{day}</span>
-                          {hasException && <span className="w-1.5 h-1.5 rounded-full" style={{backgroundColor:ACCENT}}/>}
+                          <span className={`text-base font-bold w-7 h-7 inline-flex items-center justify-center rounded-full ${isToday ? 'text-white shadow' : (di===5?'text-sky-600':di===6?'text-rose-500':'text-stone-700')}`} style={isToday ? {backgroundColor:ACCENT} : {}}>{day}</span>
+                          {hasException && <span className="w-2 h-2 rounded-full" style={{backgroundColor:ACCENT}}/>}
                         </div>
-                        <div className="space-y-0.5">{mem.map((e,i) => { const c = colorFor(e.name); return (
+                        <div className="space-y-0.5 w-full">{mem.map((e,i) => { const c = colorOf(e.name, master); return (
                           <div key={i} className="text-[11px] leading-tight rounded px-1 py-0.5" style={{background:c.bg, color:c.fg}}><span className="font-bold">{e.name}</span> <span className="tabular-nums" style={{opacity:0.78}}>{e.start}-{e.end}</span></div>
                         ); })}</div>
                         {mem.length>0 && <div className="text-[10px] text-stone-400 mt-1 tabular-nums">計 {tot}h・{mem.length}名</div>}
@@ -223,7 +223,7 @@ function ShiftManager(){
             <h2 className="text-sm font-semibold mb-3 text-stone-700">個人別 月間合計（{year}年{month}月）</h2>
             <table className="w-full text-sm">
               <thead><tr className="text-xs text-stone-500 border-b border-stone-200"><th className="text-left py-2 font-medium">氏名</th><th className="text-left py-2 font-medium">担当/区分</th><th className="text-right py-2 font-medium">月間日数</th><th className="text-right py-2 font-medium">月間合計</th></tr></thead>
-              <tbody>{master.map(e => { const c = monthlyCounts[e.name] || {days:0, hours:0}; const pat = e.days.length ? e.days.map(d=>DAYS[d]).join('') : '申告制'; return (<tr key={e.id} className="border-b last:border-b-0 border-stone-100"><td className="py-2"><span className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle" style={{backgroundColor:colorFor(e.name).fg}}/>{e.name}</td><td className="py-2 text-stone-500">{pat}</td><td className="py-2 text-right tabular-nums">{c.days}日</td><td className="py-2 text-right tabular-nums font-medium">{Math.round(c.hours*10)/10}h</td></tr>); })}
+              <tbody>{master.map(e => { const c = monthlyCounts[e.name] || {days:0, hours:0}; const pat = e.days.length ? e.days.map(d=>DAYS[d]).join('') : '申告制'; return (<tr key={e.id} className="border-b last:border-b-0 border-stone-100"><td className="py-2"><span className="inline-block w-3 h-3 rounded-full mr-2 align-middle" style={{backgroundColor:colorOf(e.name, master).fg}}/>{e.name}</td><td className="py-2 text-stone-500">{pat}</td><td className="py-2 text-right tabular-nums">{c.days}日</td><td className="py-2 text-right tabular-nums font-medium">{Math.round(c.hours*10)/10}h</td></tr>); })}
                 <tr className="font-semibold"><td className="py-2">合計</td><td/><td className="py-2 text-right tabular-nums">{totalDays}日</td><td className="py-2 text-right tabular-nums">{totalHours}h</td></tr></tbody>
             </table>
           </div>
@@ -260,8 +260,8 @@ function ExceptionEditor({ day, year, month, master, exceptions, onClose, persis
   };
   return (
     <div className="mt-4 bg-white border-2 rounded-xl p-4 shadow-sm" style={{borderColor:ACCENT}}>
-      <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-semibold flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{backgroundColor:colorFor(name).fg}}/>{year}年{month}月{day}日 の変更</h3><button onClick={onClose} className="p-1 rounded hover:bg-stone-100"><IconX size={16}/></button></div>
-      {dayExceptions.length>0 && (<div className="mb-3 space-y-1">{dayExceptions.map(x => (<div key={x.id} className="flex items-center justify-between text-xs px-2 py-1.5 rounded" style={{background:colorFor(x.name).bg, color:colorFor(x.name).fg}}><span><span className="font-bold">{x.name}</span> <span style={{opacity:0.8}}>[{label(x)}]</span></span><button onClick={()=>remove(x.id)} className="p-1 rounded hover:bg-black/10"><IconTrash size={12}/></button></div>))}</div>)}
+      <div className="flex items-center justify-between mb-3"><h3 className="text-base font-semibold flex items-center gap-2"><span className="w-3 h-3 rounded-full inline-block" style={{backgroundColor:colorOf(name, master).fg}}/>{year}年{month}月{day}日 の変更</h3><button onClick={onClose} className="p-1 rounded hover:bg-stone-100"><IconX size={18}/></button></div>
+      {dayExceptions.length>0 && (<div className="mb-3 space-y-1">{dayExceptions.map(x => (<div key={x.id} className="flex items-center justify-between text-xs px-2 py-1.5 rounded" style={{background:colorOf(x.name, master).bg, color:colorOf(x.name, master).fg}}><span><span className="font-bold">{x.name}</span> <span style={{opacity:0.8}}>[{label(x)}]</span></span><button onClick={()=>remove(x.id)} className="p-1 rounded hover:bg-black/10"><IconTrash size={12}/></button></div>))}</div>)}
       <div className="flex flex-wrap gap-2 items-center text-sm">
         <select value={name} onChange={e=>setName(e.target.value)} className="px-2 py-1.5 border border-stone-300 rounded text-sm bg-white">{master.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}</select>
         <select value={type} onChange={e=>setType(e.target.value)} className="px-2 py-1.5 border border-stone-300 rounded text-sm bg-white"><option value="時間変更">時間変更</option><option value="休み">休み</option><option value="追加出勤">追加出勤</option></select>
@@ -304,7 +304,7 @@ function MasterView({ master, persist }){
               </tr>
             ) : (
               <tr key={e.id} className="border-b last:border-b-0 border-stone-100 hover:bg-stone-50">
-                <td className="px-3 py-2 font-medium whitespace-nowrap"><span className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle" style={{backgroundColor:colorFor(e.name).fg}}/>{e.name} <span className="text-xs text-stone-400 ml-1">{e.kana}</span></td>
+                <td className="px-3 py-2 font-medium whitespace-nowrap"><span className="inline-block w-3 h-3 rounded-full mr-2 align-middle" style={{backgroundColor:colorOf(e.name, master).fg}}/>{e.name} <span className="text-xs text-stone-400 ml-1">{e.kana}</span></td>
                 <td className="px-3 py-2 tabular-nums text-stone-600 whitespace-nowrap">{e.start}〜{e.end}</td>
                 <td className="px-3 py-2 tabular-nums text-stone-600 whitespace-nowrap">{e.brk}分</td>
                 <td className="px-3 py-2 tabular-nums">{calcJisDo(e)}h</td>
@@ -315,7 +315,7 @@ function MasterView({ master, persist }){
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-stone-500 mt-3">※ 名前の左の丸はカレンダーの色と対応しています。出勤曜日を空にすると「申告制」になります。</p>
+      <p className="text-xs text-stone-500 mt-3">※ 名前の左の丸はカレンダーの色と対応しています（並び順で色が決まります）。出勤曜日を空にすると「申告制」になります。</p>
     </main>
   );
 }
@@ -323,7 +323,7 @@ function PrintView({ year, month, weeks, master, exceptions, changeMonth }){
   return (<>
     <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 print:hidden">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <div className="flex items-center gap-2"><button onClick={()=>changeMonth(-1)} className="p-2 rounded-md hover:bg-stone-100"><IconLeft size={18}/></button><div className="text-lg font-semibold tabular-nums px-2">{year}年 {month}月（掲示用）</div><button onClick={()=>changeMonth(1)} className="p-2 rounded-md hover:bg-stone-100"><IconRight size={18}/></button></div>
+        <div className="flex items-center gap-1"><button onClick={()=>changeMonth(-1)} className="p-2 rounded-md hover:bg-stone-100"><IconLeft size={22}/></button><div className="text-2xl font-bold tabular-nums px-2">{year}年 {month}月<span className="text-base font-semibold text-stone-500">（掲示用）</span></div><button onClick={()=>changeMonth(1)} className="p-2 rounded-md hover:bg-stone-100"><IconRight size={22}/></button></div>
         <button onClick={()=>window.print()} className="px-4 py-2 text-white text-sm rounded flex items-center gap-1.5" style={{backgroundColor:ACCENT}}><IconPrinter size={14}/>印刷する（A4横）</button>
       </div>
       <p className="text-xs text-stone-500 mb-3">下のプレビューが印刷されます。印刷ダイアログで「横向き」「1ページに合わせる」を選んでください。</p>
