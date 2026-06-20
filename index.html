@@ -18,7 +18,16 @@
 <script src="app-config.js"></script>
 <style>
   body { background: #FAFAF9; font-family: "Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",YuGothic,"Meiryo",system-ui,sans-serif; }
-  @media print { @page { size: A4 landscape; margin: 10mm; } body { background: white !important; } }
+  @media print {
+    @page { size: A4 landscape; margin: 8mm; }
+    html, body { background: white !important; }
+    .print-area { width: 100% !important; }
+    .print-area .min-w-\[640px\] { width: 100% !important; min-width: 0 !important; }
+    .print-area .min-h-\[80px\] { min-height: 96px !important; }
+    .print-area .text-\[10px\] { font-size: 12px !important; }
+    .print-area .text-\[10px\] > div:first-child { font-size: 15px !important; }
+    .print-area h1 { font-size: 20px !important; }
+  }
 </style>
 </head>
 <body>
@@ -334,7 +343,7 @@ function PrintView({ year, month, weeks, master, exceptions, changeMonth }){
 }
 function PrintLayout({ year, month, weeks, master, exceptions }){
   return (
-    <div className="bg-white">
+    <div className="bg-white print-area">
       <h1 className="text-center text-xl font-bold mb-1">栄ガーデン　袋詰めシフト　{year}年{month}月</h1>
       <p className="text-center text-xs text-stone-500 mb-3">勤務時間（出社〜退社）</p>
       <div className="border border-stone-400 min-w-[640px]">
